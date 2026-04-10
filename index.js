@@ -120,6 +120,11 @@ The call is the next step.
 
 IMPORTANT: If your response needs to include the booking link, respond with ONLY the link on its own line, nothing else. Format your response so the link is separate.`;
 
+// TEST ENDPOINT - returns instant hardcoded response
+app.post('/test', (req, res) => {
+  res.json({ response: "this is a test reply" });
+});
+
 app.post('/webhook', async (req, res) => {
   try {
     const { message, user_id, name } = req.body;

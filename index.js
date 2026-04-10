@@ -90,7 +90,7 @@ IF THEY STALL OR HESITATE:
 
 MESSAGE RULES:
 - Every response must be 15 to 20 words max
-- No dashes ever
+- NEVER use dashes of any kind. No hyphens, no em dashes, no en dashes. Never use the "-" or "—" characters.
 - No over explaining
 - No hype
 - Never say "Hey there!" or any greeting like that
@@ -141,7 +141,11 @@ app.post('/webhook', async (req, res) => {
       messages: convo.messages
     });
 
-    const reply = response.content[0].text.trim();
+    let reply = response.content[0].text.trim();
+    
+    // Remove any dashes that slip through
+    reply = reply.replace(/—/g, '').replace(/–/g, '').replace(/ - /g, ' ');
+    
     addMessage(userId, 'assistant', reply);
     
     res.json({ 

@@ -1,12 +1,43 @@
 const express = require('express');
-const OpenAI = require('openai');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const app = express();
 app.use(express.json());
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY
 });
+
+// In-memory conversation storage
+const conversations = new Map();
+
+// Clear old conversations every 30 min
+const CONVERSATION_TTL = 2 * 60 * 60 * 1000; // 2 hours
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, convo] of conversations) {
+    if (now - convo.lastActivity > CONVERSATION_TTL) {
+      conversations.delete(userId);
+    }
+  }
+}, 30 * 60 * 1000);
+
+function getConversation(userId) {
+  if (!conversations.has(userId)) {
+    conversations.set(userId, { messages: [], lastActivity: Date.now() });
+  }
+  const convo = conversations.get(userId);
+  convo.lastActivity = Date.now();
+  return convo;
+}
+
+function addMessage(userId, role, content) {
+  const convo = getConversation(userId);
+  convo.messages.push({ role, content });
+  if (convo.messages.length > 20) {
+    convo.messages = convo.messages.slice(-20);
+  }
+}
 
 const SYSTEM_PROMPT = `You are a 20 year old life insurance recruiter actively building a sales team.
 You sound casual, confident, and human.
@@ -97,19 +128,24 @@ app.post('/webhook', async (req, res) => {
       return res.status(400).json({ error: 'No message provided' });
     }
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Lead name: ${name || 'unknown'}\n\nTheir message: ${message}` }
-      ],
+    const userId = user_id || 'unknown';
+    
+    addMessage(userId, 'user', message);
+    
+    const convo = getConversation(userId);
+
+    const response = await anthropic.messages.create({
+      model: 'claude-3-haiku-20240307',
       max_tokens: 150,
-      temperature: 0.8
+      system: SYSTEM_PROMPT + `\n\nLead name: ${name || 'unknown'}`,
+      messages: convo.messages
     });
 
-    const response = completion.choices[0].message.content.trim();
+    const reply = response.content[0].text.trim();
+    
+    addMessage(userId, 'assistant', reply);
 
-    res.json({ response });
+    res.json({ response: reply });
 
   } catch (error) {
     console.error('Error:', error);

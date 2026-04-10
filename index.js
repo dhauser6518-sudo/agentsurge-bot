@@ -8,11 +8,9 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
-// In-memory conversation storage
 const conversations = new Map();
+const CONVERSATION_TTL = 2 * 60 * 60 * 1000;
 
-// Clear old conversations every 30 min
-const CONVERSATION_TTL = 2 * 60 * 60 * 1000; // 2 hours
 setInterval(() => {
   const now = Date.now();
   for (const [userId, convo] of conversations) {
@@ -120,21 +118,16 @@ The call is the next step.
 
 IMPORTANT: If your response needs to include the booking link, respond with ONLY the link on its own line, nothing else. Format your response so the link is separate.`;
 
-// TEST ENDPOINT - returns instant hardcoded response
-app.post('/test', (req, res) => {
-  res.json({ response: "this is a test reply" });
-});
-
 app.post('/webhook', async (req, res) => {
   try {
-    const { message, user_id, name } = req.body;
-
-    if (!message) {
-      return res.status(400).json({ error: 'No message provided' });
-    }
-
-    const userId = user_id || 'unknown';
+    // Log the full request body to see what ManyChat sends
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
     
+    // Try multiple possible field names for the message
+    const message = req.body.message || req.body.last_input_text || req.body.text || req.body.last_text_input || 'hello';
+    const userId = req.body.user_id || req.body.id || req.body.key || 'unknown';
+    const name = req.body.name || req.body.first_name || req.body.full_name || 'friend';
+
     addMessage(userId, 'user', message);
     
     const convo = getConversation(userId);
@@ -142,7 +135,7 @@ app.post('/webhook', async (req, res) => {
     const response = await anthropic.messages.create({
       model: 'claude-3-haiku-20240307',
       max_tokens: 150,
-      system: SYSTEM_PROMPT + `\n\nLead name: ${name || 'unknown'}`,
+      system: SYSTEM_PROMPT + `\n\nLead name: ${name}`,
       messages: convo.messages
     });
 

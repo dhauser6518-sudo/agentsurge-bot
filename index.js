@@ -10,6 +10,8 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
+const MANYCHAT_API_KEY = process.env.MANYCHAT_API_KEY;
+
 const conversations = new Map();
 const CONVERSATION_TTL = 2 * 60 * 60 * 1000;
 
@@ -37,6 +39,31 @@ function addMessage(userId, role, content) {
   if (convo.messages.length > 20) {
     convo.messages = convo.messages.slice(-20);
   }
+}
+
+async function sendManyChatMessage(subscriberId, text) {
+  const response = await fetch('https://api.manychat.com/fb/sending/sendContent', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${MANYCHAT_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      subscriber_id: subscriberId,
+      data: {
+        version: 'v2',
+        content: {
+          messages: [
+            {
+              type: 'text',
+              text: text
+            }
+          ]
+        }
+      }
+    })
+  });
+  return response.json();
 }
 
 const SYSTEM_PROMPT = `You are Danny, a 20 year old life insurance recruiter. You're texting on Instagram DM recruiting people to join your sales team.
@@ -87,6 +114,47 @@ NEVER:
 - Write long paragraphs
 - Sound like a bot`;
 
+// ManyChat webhook endpoint
+app.post('/manychat', async (req, res) => {
+  try {
+    console.log('ManyChat webhook received:', JSON.stringify(req.body, null, 2));
+    
+    const subscriberId = req.body.id || req.body.subscriber_id;
+    const message = req.body.last_input_text || req.body.message || req.body.text;
+    
+    if (!subscriberId || !message) {
+      console.log('Missing subscriberId or message');
+      return res.json({ status: 'ok' });
+    }
+
+    addMessage(subscriberId, 'user', message);
+    const convo = getConversation(subscriberId);
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 150,
+      system: SYSTEM_PROMPT,
+      messages: convo.messages
+    });
+
+    let reply = response.content[0].text.trim();
+    reply = reply.replace(/—/g, '').replace(/–/g, '').replace(/ - /g, ' ');
+    
+    addMessage(subscriberId, 'assistant', reply);
+
+    // Send reply via ManyChat API
+    const manychatResponse = await sendManyChatMessage(subscriberId, reply);
+    console.log('ManyChat API response:', manychatResponse);
+
+    res.json({ status: 'ok' });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.json({ status: 'error', message: error.message });
+  }
+});
+
+// Keep old webhook for testing
 app.post('/webhook', async (req, res) => {
   try {
     let message = 'hello';
@@ -109,7 +177,6 @@ app.post('/webhook', async (req, res) => {
 
     let reply = response.content[0].text.trim();
     reply = reply.replace(/—/g, '').replace(/–/g, '').replace(/ - /g, ' ');
-    reply = reply.replace(/\[BOOKING LINK\]/g, 'https://join.agenthiringcenter.com/');
     
     addMessage(userId, 'assistant', reply);
     
